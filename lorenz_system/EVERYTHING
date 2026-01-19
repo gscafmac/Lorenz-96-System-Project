@@ -1,0 +1,213 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import math
+
+#objects
+class DerivEquation:
+    def __init__(self, index, sys_size, forcing):
+        self.index = index
+        self.sys_size = sys_size
+        self.forcing = forcing
+    
+    def solve(self, state_vec, t):
+        # case where need to wrap x_n-1 to last n and x_n-2 to second to last
+        if self.index == 0:
+            return (state_vec[self.index+1] - 1) * 1 - state_vec[self.index] + self.forcing(t)
+        
+        # case where need to wrap x_n-2 to last n
+        if self.index == 1:
+            return (state_vec[self.index+1] - 1) * state_vec[self.index-1] - state_vec[self.index] + self.forcing(t) 
+          
+        # case where need to wrap x_n+1 to first term
+        if self.index == self.sys_size-1:
+            return (1 - state_vec[self.index-2]) * state_vec[self.index-1] - state_vec[self.index] + self.forcing(t)
+
+        # normal case
+        return (state_vec[self.index+1] - state_vec[self.index-2]) * state_vec[self.index-1] - state_vec[self.index] + self.forcing(t)
+    
+
+class LorenzSystemEquations:
+    def __init__(self, sys_size, forcing):
+        self.sys_size = sys_size
+        self.forcing = forcing
+        # list of equation objects
+        self.eq_list = [DerivEquation(i, self.sys_size, self.forcing) for i in range(sys_size)]# make new list full of each equation starting from x_0
+
+    def get_size(self):
+        return self.sys_size
+    
+    def get_eqs(self):
+        return self.eq_list
+    
+    def random_initial(self, lower=1, upper=5):
+        return np.random.randint(lower, upper, self.sys_size)
+    
+
+
+
+#forcing functions
+class ConstantForcing:
+    def __init__(self, c):
+        self.c = c
+
+    def __call__(self, t):
+        return self.c
+    
+
+class SinForcing:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    def __call__(self, t):
+        return self.a * math.sin(self.b * t)
+    
+
+class CosForcing:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    def __call__(self, t):
+        return self.a * math.cos(self.b * t)
+    
+
+class ConstantHeavySideForcing:
+    def __init__(self, c, z):
+        self.c = c
+        self.z = z
+
+    def __call__(self, t):
+        if t >= self.z:
+            return self.c
+        return 0
+    
+
+class SinHeavySideForcing:
+    def __init__(self, a, b, z):
+        self.a = a
+        self.b = b
+        self.z = z
+
+    def __call__(self, t):
+        if t >= self.z:
+            return self.a * math.sin(self.b * t)
+        return 0
+
+
+class CosHeavySideForcing:
+    def __init__(self, a, b, z):
+        self.a = a
+        self.b = b
+        self.z = z
+
+    def __call__(self, t):
+        if t >= self.z:
+            return self.a * math.cos(self.b * t)
+        return 0
+    
+
+
+
+#solvers
+def eulers_method_sys(system, dt, final_time, initial_state=None):
+    num_steps = int(final_time/dt)
+    size = system.get_size()
+    t = 0.0
+
+
+    all_vals = np.zeros((size, num_steps))
+
+    if initial_state is None:
+        current_state = system.random_initial()
+    else:
+        current_state = initial_state.copy()
+
+    all_vals[:,0] = current_state.copy()
+    next_state = np.zeros(size)
+
+    for i in range(num_steps-1):
+        for j in range(size):
+            derivative = system.get_eqs()[j].solve(current_state, t)
+            next_state[j] = current_state[j] + (derivative * dt)
+        all_vals[:,i+1] = next_state
+        current_state = next_state.copy()
+        t += dt
+
+    return all_vals
+
+
+
+#visualizations
+def animate_circle(data_arr):
+    num_sys, num_steps = data_arr.shape
+
+    fig, ax = plt.subplots(figsize=(6,6))
+    ax.set_xlim(-1.53, 1.53)
+    ax.set_ylim(-1.53, 1.53)
+    ax.axis('off')
+
+    # each angle for each circle
+    angles = np.linspace(0, 2*np.pi, num_sys, endpoint=False)
+    radius = 1.4
+    positions = np.array([radius * np.cos(angles), radius * np.sin(angles)]).T # puts each circle in spot with x and y value
+
+    # create circles
+    scatter = ax.scatter(positions[:,0], positions[:,1], s=400, c=data_arr[:,0], cmap='viridis')
+
+    cbar = fig.colorbar(scatter, ax=ax)
+    cbar.set_label('Value') # Set the label for the colorbar
+
+    # function to update called for each animation frame
+    def update(frame):
+        scatter.set_array(data_arr[:, frame])
+        scatter.set_clim(np.min(data_arr), np.max(data_arr)) # normalize colorS
+        return [scatter]
+
+    # actually does the animating
+    anim = FuncAnimation(fig, update, frames=num_steps, interval=10, blit=True)
+    plt.show()
+
+
+def plot_time_series(data, dt, N, F, indices=[0, 10, 20, 30]):
+    t = np.arange(data.shape[1]) * dt
+    
+    plt.figure(figsize=(10, 5))
+    for i in indices:
+        plt.plot(t, data[i], label=f"$x_{i}$")
+        
+    plt.xlabel("Time")
+    plt.ylabel("State Value")
+    plt.title(f"System of Size {N} With forcing: {F}")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+def perturbation_norm(data1, data2, dt, N, F):
+    t = np.arange(data1.shape[1]) * dt
+    diff = np.linalg.norm(data1 - data2, axis=0)
+
+    plt.figure(figsize=(8, 5))
+    plt.semilogy(t, diff)  # log scale vertical axis
+    plt.xlabel("Time")
+    plt.ylabel(r"$\| x(t) - \tilde{x}(t) \|_2$")
+    plt.title(f"System of Size {N} With forcing: {F}")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+def hovmoller_plot(data, dt):
+    t = np.arange(data.shape[1]) * dt
+    x = np.arange(data.shape[0])
+
+    plt.figure(figsize=(10, 5))
+    plt.imshow(data, aspect='auto', cmap='viridis',
+               extent=[t[0], t[-1], x[-1], x[0]])
+    plt.colorbar(label="Value")
+    plt.xlabel("Time")
+    plt.ylabel("Index (spatial position)")
+    plt.title("Hovmöller Plot of Lorenz-96 Dynamics")
+    plt.tight_layout()
+    plt.show()
